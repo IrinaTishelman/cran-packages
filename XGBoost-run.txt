@@ -1,0 +1,153 @@
+######XGboosting notes
+#https://www.r-bloggers.com/2021/02/machine-learning-with-r-a-complete-guide-to-gradient-boosting-and-xgboost/
+
+library(haven)
+install.packages("xgboost")
+install.packages("caTools")
+install.packages("dplyr")
+install.packages("caret")
+
+library(xgboost)
+library(caTools)
+library(dplyr)
+library(caret)
+
+
+#### source a built in data
+head(iris)
+
+#####train and test split
+set.seed(42)
+sample_split <- sample.split(Y = iris$Species, SplitRatio = 0.7)
+train_set <- subset(x = iris, sample_split == TRUE)
+test_set <- subset(x = iris, sample_split == FALSE)
+
+y_train <- as.integer(train_set$Species) - 1
+y_test <- as.integer(test_set$Species) - 1
+X_train <- train_set %>% select(-Species)
+X_test <- test_set %>% select(-Species)
+
+#####creating DMatrix data to be used in XG boost
+#XGBoost uses something knows as a DMatrix to store data. DMatrix is nothing but a specific data structure used 
+#to store data in a way optimized for both memory efficiency and training speed. 
+#Besides the DMatrix, you’ll also have to specify the parameters for the XGBoost model.
+#You can learn more about all the available parameters here, but we’ll stick
+#to a subset of the most basic ones.
+
+xgb_train <- xgb.DMatrix(data = as.matrix(X_train), label = y_train)
+xgb_test <- xgb.DMatrix(data = as.matrix(X_test), label = y_test)
+xgb_params <- list(
+  booster = "gbtree",
+  eta = 0.01,
+  max_depth = 8,
+  gamma = 4,
+  subsample = 0.75,
+  colsample_bytree = 1,
+  objective = "multi:softprob",
+  eval_metric = "mlogloss",
+  num_class = length(levels(iris$Species))
+)
+
+#####the model
+xgb_model <- xgb.train(
+  params = xgb_params,
+  data = xgb_train,
+  nrounds = 5000,
+  verbose = 1
+)
+xgb_model
+
+#You can use the predict() function to make predictions with the XGBoost model, just as with 
+#any other model. The next step is to covert the predictions to a data frame and assign 
+#column names, as the predictions are returned in the form of probabilities
+
+xgb_preds <- predict(xgb_model, as.matrix(X_test), reshape = TRUE)
+xgb_preds <- as.data.frame(xgb_preds)
+colnames(xgb_preds) <- levels(iris$Species)
+xgb_preds
+
+#these probabilities add up to 1 for a single row. The column with the highest probability 
+#is the flower species predicted by the model.
+
+xgb_preds$PredictedClass <- apply(xgb_preds, 1, function(y) colnames(xgb_preds)[which.max(y)])
+xgb_preds$ActualClass <- levels(iris$Species)[y_test + 1]
+xgb_preds
+
+#calculate the overall accuracy score as a sum of instances where predicted and actual classes 
+#match divided by the total number of rows
+accuracy <- sum(xgb_preds$PredictedClass == xgb_preds$ActualClass) / nrow(xgb_preds)
+accuracy
+
+#####confusion matrix
+confusionMatrix(factor(xgb_preds$ActualClass), factor(xgb_preds$PredictedClass))
+
+confusionMatrix
+#####gradient boosting
+
+####applied boosting in OLS regression using Generalized boosting model (GBM)
+##notes on GBM: https://cran.r-project.org/web/packages/gbm/gbm.pdf
+###notes on GBM: https://www.rdocumentation.org/packages/gbm/versions/2.2.2/topics/gbm
+# Load the mtcars dataset
+data(mtcars)
+
+# Split the dataset into training and testing sets
+library(caTools)
+set.seed(123)
+split <- sample.split(mtcars$mpg, SplitRatio = 0.7)
+train <- mtcars[split, ]
+test <- mtcars[!split, ]
+
+# Fit a boosting model to the training data
+install.packages("gbm")
+library(gbm)
+boost <- gbm(mpg ~ ., data = train,
+             distribution = "gaussian",
+             n.trees = 1000, shrinkage = 0.01,
+             interaction.depth = 4,
+             bag.fraction = 0.7,
+             n.minobsinnode = 5)
+
+# Use the model to predict the mpg of the test data
+predictions <- predict(boost, newdata = test)
+
+# Evaluate the performance of the model
+# using the mean squared error
+mse <- mean((test$mpg - predictions)^2)
+mse
+
+####notes on boosting https://www.geeksforgeeks.org/boosting-in-machine-learning-boosting-and-adaboost/
+
+#####ADA boosting
+install.packages("adabag")
+library(adabag)
+
+# Load the iris dataset
+data(iris)
+
+# Convert the Species column to a factor
+iris$Species <- as.factor(iris$Species)
+
+# Split the data into training and testing sets
+index <- sample(nrow(iris), nrow(iris) * 0.7)
+train <- iris[index, ]
+test <- iris[-index, ]
+
+# Fit the AdaBoost model using decision
+# trees as base learners
+model <- boosting(Species ~ ., data = train,
+                  boos = TRUE, mfinal = 10,
+                  control = rpart.control(cp = 0.01,
+                                          minsplit = 3))
+
+# Make predictions on the test set
+predictions <- predict(model, newdata = test)
+
+# Calculate the confusion matrix
+confusion_matrix <- table(predictions$class, test$Species)
+
+# Calculate the accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+
+# Print the confusion matrix and accuracy
+print(confusion_matrix)
+print(paste0("Accuracy: ", accuracy))
